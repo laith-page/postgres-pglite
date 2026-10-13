@@ -97,7 +97,6 @@ $(pwd)/pglite/src/pglitec/pglitec.o \
 CONFIGURE_PARAMS="\
 ac_cv_exeext=.js \
 --host wasm32-unknown-emscripten \
---disable-spinlocks \
 --without-llvm  \
 --without-pam \
 --disable-largefile \
