@@ -1,0 +1,150 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CI_PROVIDER: l3
+  BUILD_JOBS: '4'
+  TEST_JOBS: '8'
+jobs:
+  sanity:
+    name: minimal Meson sanity
+    runs-on: l3-ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+      - run: mise run check
+      - run: sudo bash .ci/install-deps.sh sanity
+      - run: bash .ci/linux.sh sanity
+  native:
+    name: native Linux ${{ matrix.mode }}
+    needs: sanity
+    runs-on: l3-ubuntu-26.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [autoconf, meson, warnings]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install native dependencies
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          if [ "$MODE" = warnings ]; then
+            sudo bash .ci/install-deps.sh warnings
+          else
+            sudo bash .ci/install-deps.sh native
+          fi
+      - name: Build and test
+        env:
+          MODE: ${{ matrix.mode }}
+        run: bash .ci/linux.sh "$MODE"
+      - name: Preserve build and test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-${{ matrix.mode }}-failure-logs
+          path: |
+            build-ci/**/config.log
+            build-ci/**/meson-logs/**
+            build-ci/**/testrun/**
+            build-ci/**/*.diffs
+            build-ci/**/regress_log_*
+          if-no-files-found: warn
+          retention-days: 14
+  linux32:
+    name: native Linux 32-bit Meson
+    needs: sanity
+    runs-on: l3-ubuntu-26.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and test in a native i386 userspace
+        run: |
+          docker run --rm --platform linux/386 --cpus=4 \
+            --mount "type=bind,src=$PWD,dst=/workspace" \
+            --workdir /workspace \
+            -e SOURCE_UID="$(id -u)" -e SOURCE_GID="$(id -g)" \
+            -e BUILD_JOBS -e TEST_JOBS \
+            i386/debian:bookworm@sha256:25a29406cd6945ae7cfc59f1f466c18a3b29a988c8e235c84360ba16161e60ed \
+            bash -euc '
+              bash .ci/install-deps.sh meson32
+              groupadd -g "$SOURCE_GID" pgci
+              useradd -m -u "$SOURCE_UID" -g "$SOURCE_GID" pgci
+              exec runuser -u pgci -- bash .ci/linux.sh meson32
+            '
+      - name: Preserve 32-bit test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux32-failure-logs
+          path: build-ci/meson32/
+          if-no-files-found: warn
+          retention-days: 14
+  wasm:
+    name: WASM build and Node smoke
+    needs: sanity
+    runs-on: l3-ubuntu-26.04-32core
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Build existing WASM distribution and extensions
+        run: |
+          mkdir -p dist
+          docker run --rm --cpus=32 \
+            --mount "type=bind,src=$PWD,dst=$PWD" \
+            --mount "type=bind,src=$PWD/dist,dst=/pglite" \
+            --workdir "$PWD" \
+            -e DEBUG=false -e PGLITE_VERSION="ci-${GITHUB_SHA}" \
+            electricsql/pglite-builder:3.1.74-7@sha256:9e75d29ed19d651b393bf9462bbe770405bd3b26e57d3b76001ac844539835e1 \
+            bash -e -o pipefail ./build-pglite.sh
+      - name: Run WASM CLI and instantiate the module in Node
+        run: timeout 120 node .ci/wasm-smoke.mjs dist
+      - name: Preserve WASM distribution
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: postgres-pglite-wasm
+          path: |
+            dist/bin/pglite.*
+            dist/extensions/
+          if-no-files-found: error
+          retention-days: 7
+  check:
+    name: Check
+    if: ${{ always() }}
+    needs: [sanity, native, linux32, wasm]
+    runs-on: l3-ubuntu-26.04
+    timeout-minutes: 2
+    steps:
+      - name: Require all native and WASM checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          results = json.loads(os.environ['RESULTS'])
+          failures = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          if failures:
+              print(failures)
+              sys.exit(1)
+          PY

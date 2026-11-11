@@ -27,7 +27,7 @@ fi
 
 # first build pglite-libc object WITHOUT the overriding flags
 # pushd pglite/src/pglitec && emcc -g --no-wasm-opt -gsource-map -static -fPIC -o pglitec.o -c pglitec.c && popd
-pushd pglite/src/pglitec && emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c && popd
+(cd pglite/src/pglitec && emcc $PGLITE_CFLAGS -static -fpic -o pglitec.o -c pglitec.c) || exit 10
 
 # -Dread=pgl_read -Dwrite=pgl_write
 PGLITE_CFLAGS="$PGLITE_CFLAGS \
@@ -133,7 +133,7 @@ emmake make PORTNAME=emscripten install || { echo 'error: emmake make PORTNAME=e
 emmake make PORTNAME=emscripten -C contrib/ -j || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ -j' ; exit 31; }
 
 # Step 3.2 pgcrypto - special case
-cd ./pglite && ./build-pgcrypto.sh && cd ../
+(cd ./pglite && ./build-pgcrypto.sh) || exit 33
 
 # Step 3.3: make dist contrib extensions - this will create an archive for each extension
 PGLITE_WITH_PGCRYPTO=1 emmake make PORTNAME=emscripten -C contrib/ dist || { echo 'error: emmake make PORTNAME=emscripten -C contrib/ dist' ; exit 32; }

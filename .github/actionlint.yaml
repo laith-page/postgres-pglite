@@ -1,0 +1,4 @@
+self-hosted-runner:
+  labels:
+    - l3-ubuntu-26.04
+    - l3-ubuntu-26.04-32core
