@@ -20,6 +20,28 @@ case $mode in
   *) echo "unknown dependency mode: $mode" >&2; exit 2 ;;
 esac
 apt-get install -y --no-install-recommends "${packages[@]}"
+if [ "$mode" = native ] && [ -f /etc/apparmor.d/usr.sbin.slapd ]; then
+  # Ubuntu confines slapd to its system directories. The LDAP TAP suites use
+  # private configuration, certificates, databases and logs in this checkout.
+  # Retain the profile and permit only these owner-controlled test directories.
+  test_workspace=$(pwd -P)
+  case $test_workspace in
+    *[!a-zA-Z0-9_./-]*) echo 'unsupported AppArmor workspace path' >&2; exit 2 ;;
+  esac
+  grep -Fq '<local/usr.sbin.slapd>' /etc/apparmor.d/usr.sbin.slapd
+  mkdir -p /etc/apparmor.d/local
+  for test_tree in \
+    meson/testrun/ldap \
+    meson/testrun/ldap_password_func \
+    autoconf/src/test/ldap/tmp_check \
+    autoconf/src/test/modules/ldap_password_func/tmp_check; do
+    rule="owner \"$test_workspace/build-ci/$test_tree/**\" rwk,"
+    if ! grep -Fxq "$rule" /etc/apparmor.d/local/usr.sbin.slapd 2>/dev/null; then
+      printf '%s\n' "$rule" >> /etc/apparmor.d/local/usr.sbin.slapd
+    fi
+  done
+  apparmor_parser -r /etc/apparmor.d/usr.sbin.slapd
+fi
 if [ "$mode" != sanity ]; then
   sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen
   locale-gen en_US.UTF-8

@@ -20,3 +20,14 @@ io_uring queue initialization failures with `Cannot allocate memory` while other
 tests passed. This is consistent with insufficient locked-memory allowance;
 the actual rerun must verify the resource fix. Failed native LDAP setup also
 prints configuration validation and relevant AppArmor denials for diagnosis.
+
+Native Meson and autoconf artifacts confirmed AppArmor denying `slapd` access to
+the generated `slapd.conf`. Dependency setup retains Ubuntu's confinement and
+adds owner-only read/write/lock access for the four LDAP TAP fixture directories
+through its local profile include. It reloads the existing profile; it does not
+disable AppArmor or put the daemon in complain mode.
+
+The i386 container uses Docker's `--init` to reap orphaned test postmasters.
+The shared-memory recovery test deliberately kills its postmaster; without a
+reaper, the artifact showed the killed PID still blocking startup and shutdown.
+The complete suite, including that recovery test, must pass on the new commit.

@@ -85,7 +85,7 @@ jobs:
           persist-credentials: false
       - name: Build and test in a native i386 userspace
         run: |
-          docker run --rm --platform linux/386 --cpus=4 \
+          docker run --rm --init --platform linux/386 --cpus=4 \
             --security-opt seccomp=.ci/docker-seccomp-io-uring.json \
             --ulimit memlock=-1:-1 \
             --mount "type=bind,src=$PWD,dst=/workspace" \
