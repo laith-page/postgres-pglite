@@ -12,3 +12,11 @@ can run. `docker-seccomp-io-uring.json` retains the upstream Docker profile from
 and adds only `io_uring_setup`, `io_uring_enter`, and `io_uring_register` to its
 allowlist. Its Apache 2.0 license is preserved in `docker-seccomp-LICENSE`.
 Keep the tests unprivileged and the remaining syscall restrictions enabled.
+
+Both Meson jobs permit locked memory for io_uring queues. The native job raises
+only its test shell's inherited memlock limit with `prlimit`; the i386 container
+sets its memlock limit through Docker. The native failure artifact showed 48
+io_uring queue initialization failures with `Cannot allocate memory` while other
+tests passed. This is consistent with insufficient locked-memory allowance;
+the actual rerun must verify the resource fix. Failed native LDAP setup also
+prints configuration validation and relevant AppArmor denials for diagnosis.

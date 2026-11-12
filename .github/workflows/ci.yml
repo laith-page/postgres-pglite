@@ -50,7 +50,17 @@ jobs:
       - name: Build and test
         env:
           MODE: ${{ matrix.mode }}
-        run: bash .ci/linux.sh "$MODE"
+        run: |
+          if [ "$MODE" = meson ]; then
+            sudo prlimit --pid "$$" --memlock=unlimited
+          fi
+          ulimit -l
+          exec bash .ci/linux.sh "$MODE"
+      - name: Diagnose failed LDAP test setup
+        if: ${{ failure() }}
+        run: |
+          find build-ci -name slapd.conf -print -exec /usr/sbin/slapd -Tt -f {} \; || true
+          sudo journalctl -k --since '-45 min' --no-pager | grep -E 'apparmor="DENIED".*slapd|slapd.*apparmor="DENIED"' | tail -30 || true
       - name: Preserve build and test logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -77,6 +87,7 @@ jobs:
         run: |
           docker run --rm --platform linux/386 --cpus=4 \
             --security-opt seccomp=.ci/docker-seccomp-io-uring.json \
+            --ulimit memlock=-1:-1 \
             --mount "type=bind,src=$PWD,dst=/workspace" \
             --workdir /workspace \
             -e SOURCE_UID="$(id -u)" -e SOURCE_GID="$(id -g)" \
