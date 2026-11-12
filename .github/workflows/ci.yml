@@ -76,6 +76,7 @@ jobs:
       - name: Build and test in a native i386 userspace
         run: |
           docker run --rm --platform linux/386 --cpus=4 \
+            --security-opt seccomp=.ci/docker-seccomp-io-uring.json \
             --mount "type=bind,src=$PWD,dst=/workspace" \
             --workdir /workspace \
             -e SOURCE_UID="$(id -u)" -e SOURCE_GID="$(id -g)" \
